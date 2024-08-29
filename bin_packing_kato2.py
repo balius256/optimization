@@ -10,13 +10,13 @@ lengths = [100, 70, 53, 45, 27, 25, 23]
 
 # 切断材料の必要数量をランダムに決定する関数
 def generate_required_quantities():
-    return [random.randint(1, 10000) for _ in lengths]
+    return [random.randint(1, 100) for _ in lengths]
 
 # 必要数量を生成
 required_quantities = generate_required_quantities()
 
 # 最大母材数の仮定
-N = 2000
+N = 1000
 
 def calculate_waste(pattern, lengths, total_length):
     used_length = sum(pattern[i] * lengths[i] for i in range(len(pattern)))
@@ -49,6 +49,7 @@ end_time = time.time()
 used_patterns = []
 pattern_counts = {}
 total_cut_material_length_initial = 0
+waste_per_pattern = []
 
 # 母材の長さ、切断材料の長さ、切断材料の必要数量を出力
 print(f"\n母材の長さ: {L} mm")
@@ -65,14 +66,13 @@ for j in range(N):
             pattern_counts[pattern] = 1
             used_patterns.append(pattern)
 
-total_raw_materials_used = sum(y[j].varValue for j in range(N))
-total_waste_length = 0
-
-print(f"\n初期解で見つかった切り出しパターンとその利用回数:")
+# 各パターンの端切れ長を計算し、パターンごとに保存
 for pattern, count in pattern_counts.items():
     waste_length = calculate_waste(pattern, lengths, L)
     total_waste_length += waste_length * count
     total_cut_material_length_initial += sum(pattern[i] * lengths[i] for i in range(len(pattern))) * count
+    waste_per_pattern.append((pattern, waste_length, count))
+
     print(f"パターン {pattern}: {count} 回使用, 端材の長さ: {waste_length} mm")
 
 # 初期解の余分な切断材料の総長さを計算
@@ -80,6 +80,9 @@ total_required_material_length = sum(required_quantities[i] * lengths[i] for i i
 total_excess_cut_material_length_initial = total_cut_material_length_initial - total_required_material_length
 
 print(f"\n初期解の余分な切断材料の総長さ: {total_excess_cut_material_length_initial} mm")
+
+# 端切れ長が短い順にパターンをソート
+waste_per_pattern.sort(key=lambda x: x[1])
 
 # ステップ2: パターン数制限付き最適化の実装
 
@@ -90,26 +93,26 @@ k = 10  # 例として上限を設定
 prob2 = pulp.LpProblem("Minimize_Number_of_Raw_Materials_with_Limited_Patterns", pulp.LpMinimize)
 
 # 変数の定義
-z = pulp.LpVariable.dicts("z", (h for h in range(len(used_patterns))), lowBound=0, cat='Integer')
-w = pulp.LpVariable.dicts("w", (h for h in range(len(used_patterns))), cat='Binary')
+z = pulp.LpVariable.dicts("z", (h for h in range(len(waste_per_pattern))), lowBound=0, cat='Integer')
+w = pulp.LpVariable.dicts("w", (h for h in range(len(waste_per_pattern))), cat='Binary')
 
 # 目的関数の設定
-prob2 += pulp.lpSum([z[h] for h in range(len(used_patterns))]), "Minimize_Total_Raw_Materials_with_Limited_Patterns"
+prob2 += pulp.lpSum([z[h] for h in range(len(waste_per_pattern))]), "Minimize_Total_Raw_Materials_with_Limited_Patterns"
 
 # 制約1: 切り出し要求を満たす
 for j in range(len(lengths)):
-    prob2 += pulp.lpSum([z[h] * used_patterns[h][j] for h in range(len(used_patterns))]) >= required_quantities[j], f"Demand_Constraint_{j}"
+    prob2 += pulp.lpSum([z[h] * waste_per_pattern[h][0][j] for h in range(len(waste_per_pattern))]) >= required_quantities[j], f"Demand_Constraint_{j}"
 
 # 制約2: パターンを使用するかどうか
-for h in range(len(used_patterns)):
+for h in range(len(waste_per_pattern)):
     prob2 += z[h] >= w[h], f"Pattern_Usage_Constraint_{h}"
 
 # 制約3: 使用するパターン数の上限
-prob2 += pulp.lpSum([w[h] for h in range(len(used_patterns))]) <= k, "Pattern_Limit_Constraint"
+prob2 += pulp.lpSum([w[h] for h in range(len(waste_per_pattern))]) <= k, "Pattern_Limit_Constraint"
 
 # 制約4: 各切り出し材料長をカバーするパターンが少なくとも1つ選ばれることを保証
 for i in range(len(lengths)):
-    prob2 += pulp.lpSum([w[h] for h in range(len(used_patterns)) if used_patterns[h][i] > 0]) >= 1, f"Material_Coverage_Constraint_{i}"
+    prob2 += pulp.lpSum([w[h] for h in range(len(waste_per_pattern)) if waste_per_pattern[h][0][i] > 0]) >= 1, f"Material_Coverage_Constraint_{i}"
 
 # 最適化実行
 prob2.solve(pulp.SCIP_CMD(msg=False))  # SCIPソルバーを使用
@@ -120,9 +123,9 @@ total_waste_length_final = 0
 total_cut_material_length_final = 0
 
 print(f"\nステータス (ステップ2): {pulp.LpStatus[prob2.status]}")
-for h in range(len(used_patterns)):
+for h in range(len(waste_per_pattern)):
     if w[h].varValue > 0:
-        pattern = used_patterns[h]
+        pattern = waste_per_pattern[h][0]
         count = int(z[h].varValue)
         if count > 0:  # countが0より大きいときのみ処理
             final_pattern_counts[pattern] = count
@@ -145,7 +148,6 @@ print(f"初期の総端材の長さ: {total_waste_length} mm")
 print(f"初期の余分な切断材料の総長さ: {total_excess_cut_material_length_initial} mm")
 if final_pattern_counts:
     print(f"最終的な使用母材数: {sum(final_pattern_counts.values())}")
-    print(f"最終的な総端材の長さ: {total_waste_length_final} mm")
     print(f"最終的な余分な切断材料の総長さ: {max(0, total_excess_cut_material_length_final)} mm")
 else:
     print("最終的な解ではパターンが使用されませんでした。")
