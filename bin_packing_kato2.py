@@ -8,15 +8,27 @@ L = 1570
 # 切断材料の長さ
 lengths = [100, 70, 53, 45, 27, 25, 23]
 
-# 切断材料の必要数量
-required_quantities = [97, 16, 51, 74, 41, 56, 93]  # 指定された例の数量
+# 切断材料の必要数量をランダムに決定する関数
+def generate_required_quantities():
+    return [random.randint(1, 500) for _ in lengths]
+
+# 必要数量の生成
+required_quantities = generate_required_quantities()
 
 # 最大母材数の仮定
-N = 100
+N = 500
 
 def calculate_waste(pattern, lengths, total_length):
     used_length = sum(pattern[i] * lengths[i] for i in range(len(pattern)))
     return max(0, total_length - used_length)
+
+# 必要数量より多く切り出した材料の総長さを計算する関数
+def calculate_excess_material(cut_materials, required_quantities, lengths):
+    excess_length = 0
+    for i in range(len(cut_materials)):
+        if cut_materials[i] > required_quantities[i]:
+            excess_length += (cut_materials[i] - required_quantities[i]) * lengths[i]
+    return excess_length
 
 # ステップ1: 母材枚数最小化問題の定義
 prob1 = pulp.LpProblem("Minimize_Number_of_Raw_Materials", pulp.LpMinimize)
@@ -36,10 +48,10 @@ for i in range(len(lengths)):
 for j in range(N):
     prob1 += pulp.lpSum([lengths[i] * x[(i, j)] for i in range(len(lengths))]) <= L * y[j], f"Length_Constraint_{j}"
 
-# 最適化実行
-start_time = time.time()
+# 初期解の導出時間を計測
+start_time_initial = time.time()
 prob1.solve(pulp.PULP_CBC_CMD(msg=True))  # CBCソルバーを使用
-end_time = time.time()
+end_time_initial = time.time()
 
 # ステップ1の結果の出力
 used_patterns = []
@@ -50,11 +62,7 @@ total_waste_length = 0
 # 検算用の初期解での切り出し結果
 cut_materials_initial = [0] * len(lengths)
 
-print(f"\n母材の長さ: {L} mm")
-print(f"切断材料の長さ: {lengths} mm")
-print(f"切断材料の必要数量: {required_quantities}")
-
-print(f"\nステータス (ステップ1): {pulp.LpStatus[prob1.status]}")
+# 初期解のパターンと利用回数を集計
 for j in range(N):
     if y[j].varValue > 0:
         pattern = tuple(int(x[(i, j)].varValue) for i in range(len(lengths)))
@@ -74,12 +82,21 @@ for pattern, count in pattern_counts.items():
     for i in range(len(lengths)):
         cut_materials_initial[i] += pattern[i] * count
 
-print(f"\n初期解の余分な切断材料の総長さ: {total_cut_material_length_initial - sum(required_quantities[i] * lengths[i] for i in range(len(lengths)))} mm")
-print("\n初期解の検算結果:")
-for i in range(len(lengths)):
-    print(f"材料 {lengths[i]}mm: 必要数量 = {required_quantities[i]}個, 実際に切り出された数量 = {cut_materials_initial[i]}個")
+# 初期解の母材数と端材の長さ
+initial_material_count = sum(pattern_counts.values())
+
+# 初期解の余分な切断材料の総長さ
+total_excess_cut_material_length_initial = calculate_excess_material(cut_materials_initial, required_quantities, lengths)
+
+# 最も少ない母材数と端材長さを保存する変数
+best_material_count = float('inf')
+best_waste_length = float('inf')
+best_pattern_counts = {}
+best_cut_materials_final = []
+best_excess_cut_material_length = 0
 
 # パターン数の上限を初期解から段階的に減らしていく
+start_time_final_optimization = time.time()  # 最終解の最適化プロセス開始時間
 for k in range(len(used_patterns), 0, -1):
     print(f"\n\nパターン数の上限を {k} に設定して最適化を実行中...")
 
@@ -111,6 +128,11 @@ for k in range(len(used_patterns), 0, -1):
     prob2.solve(pulp.PULP_CBC_CMD(msg=True))
     end_time_step2 = time.time()
 
+    # 最適化結果のステータスが "Optimal" でない場合、処理を終了
+    if pulp.LpStatus[prob2.status] != "Optimal":
+        print(f"最適解が導出できなくなりました。最適化処理を終了します。")
+        break
+
     # ステップ2の結果の出力
     final_pattern_counts = {}
     total_waste_length_final = 0
@@ -134,18 +156,63 @@ for k in range(len(used_patterns), 0, -1):
                 for i in range(len(lengths)):
                     cut_materials_final[i] += pattern[i] * count
 
+    # 余分な切断材料の総長さ（最適解）
+    total_excess_cut_material_length_final = calculate_excess_material(cut_materials_final, required_quantities, lengths)
+
+    # 最適解が得られた場合、最も少ない母材数と端材長さを保存
+    if sum(final_pattern_counts.values()) < best_material_count or (sum(final_pattern_counts.values()) == best_material_count and total_waste_length_final < best_waste_length):
+        best_material_count = sum(final_pattern_counts.values())
+        best_waste_length = total_waste_length_final
+        best_pattern_counts = final_pattern_counts
+        best_cut_materials_final = cut_materials_final.copy()
+        best_excess_cut_material_length = total_excess_cut_material_length_final
+
     print(f"\n最適解で導出された切り出しパターンとその利用回数:")
     for pattern, count in final_pattern_counts.items():
         waste_length = calculate_waste(pattern, lengths, L)
         print(f"パターン {pattern}: {count} 回使用, 端材の長さ: {waste_length} mm")
 
-    # 最適解の検算結果を表示
-    print("\n最適解の検算結果:")
-    for i in range(len(lengths)):
-        print(f"材料 {lengths[i]}mm: 必要数量 = {required_quantities[i]}個, 実際に切り出された数量 = {cut_materials_final[i]}個")
-
     # 最終的な使用母材数と端材の長さを表示
     print(f"\n最終的な使用母材数: {sum(final_pattern_counts.values())}")
     print(f"最終的な総端材の長さ: {total_waste_length_final} mm")
+    print(f"余分な切断材料の総長さ: {total_excess_cut_material_length_final} mm")
     print(f"ステップ2の計算時間: {end_time_step2 - start_time_step2:.2f} 秒")
 
+end_time_final_optimization = time.time()
+
+# 初期解の出力
+print(f"\n\n--- 初期解 ---")
+print(f"初期の使用母材数: {initial_material_count}")
+print(f"初期の利用パターン数: {len(used_patterns)}")
+print(f"初期の総端材の長さ: {total_waste_length} mm")
+print(f"余分な切断材料の総長さ: {total_excess_cut_material_length_initial} mm")
+
+print("\n初期解で導出された切り出しパターンとその利用回数:")
+for pattern, count in pattern_counts.items():
+    waste_length = calculate_waste(pattern, lengths, L)
+    print(f"パターン {pattern}: {count} 回使用, 端材の長さ: {waste_length} mm")
+
+print("\n初期解の検算結果:")
+for i in range(len(lengths)):
+    print(f"材料 {lengths[i]}mm: 必要数量 = {required_quantities[i]}個, 実際に切り出された数量 = {cut_materials_initial[i]}個")
+
+# 最終的な最適解の出力
+print(f"\n\n--- 最終的な最適解 ---")
+print(f"最終的な使用母材数: {best_material_count}")
+print(f"最終的な利用パターン数: {len(best_pattern_counts)}")
+print(f"最終的な総端材の長さ: {best_waste_length} mm")
+print(f"余分な切断材料の総長さ: {best_excess_cut_material_length} mm")
+
+print(f"\n最終的な最適解で導出された切り出しパターンとその利用回数:")
+for pattern, count in best_pattern_counts.items():
+    waste_length = calculate_waste(pattern, lengths, L)
+    print(f"パターン {pattern}: {count} 回使用, 端材の長さ: {waste_length} mm")
+
+print("\n最適解の検算結果:")
+for i in range(len(lengths)):
+    print(f"材料 {lengths[i]}mm: 必要数量 = {required_quantities[i]}個, 実際に切り出された数量 = {best_cut_materials_final[i]}個")
+
+# 処理時間の出力
+print(f"\n\n--- 処理時間 ---")
+print(f"初期解導出時間: {end_time_initial - start_time_initial:.2f} 秒")
+print(f"最終的な最適化処理時間: {end_time_final_optimization - start_time_final_optimization:.2f} 秒")
