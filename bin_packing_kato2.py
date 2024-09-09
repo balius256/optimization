@@ -16,7 +16,7 @@ def generate_required_quantities():
 required_quantities = generate_required_quantities()
 
 # 最大母材数の仮定
-N = 1000
+N = 100
 
 def calculate_waste(pattern, lengths, total_length):
     used_length = sum(pattern[i] * lengths[i] for i in range(len(pattern)))
@@ -50,6 +50,7 @@ used_patterns = []
 pattern_counts = {}
 total_cut_material_length_initial = 0
 waste_per_pattern = []
+total_waste_length = 0
 
 # 母材の長さ、切断材料の長さ、切断材料の必要数量を出力
 print(f"\n母材の長さ: {L} mm")
@@ -143,11 +144,12 @@ total_excess_cut_material_length_final = total_cut_material_length_final - total
 
 # 出力のまとめ
 print(f"\n概要:")
-print(f"初期の使用母材数: {total_raw_materials_used}")
+print(f"初期の使用母材数: {sum(y[j].varValue for j in range(N))}")
 print(f"初期の総端材の長さ: {total_waste_length} mm")
 print(f"初期の余分な切断材料の総長さ: {total_excess_cut_material_length_initial} mm")
 if final_pattern_counts:
     print(f"最終的な使用母材数: {sum(final_pattern_counts.values())}")
+    print(f"最終的な総端材の長さ: {total_waste_length_final} mm")
     print(f"最終的な余分な切断材料の総長さ: {max(0, total_excess_cut_material_length_final)} mm")
 else:
     print("最終的な解ではパターンが使用されませんでした。")
