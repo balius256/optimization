@@ -8,7 +8,11 @@ L = 1570
 # 切断材料の長さ
 lengths = [100, 70, 53, 45, 27, 25, 23]
 
-# 切断材料の必要数量
+# 切断材料の必要数量をランダムに決定する関数
+def generate_required_quantities():
+    return [random.randint(1, 100) for _ in lengths]
+
+# 必要数量を生成
 required_quantities = [97, 16, 51, 74, 41, 56, 93]  # 指定された例の数量
 
 # 最大母材数の仮定
@@ -88,12 +92,10 @@ print("\n初期解の検算結果:")
 for i in range(len(lengths)):
     print(f"材料 {lengths[i]}mm: 必要数量 = {required_quantities[i]}個, 実際に切り出された数量 = {cut_materials_initial[i]}個")
 
-# ステップ2: パターン数制限付き最適化の実装
+# パターン数の上限は初期解のパターン数
+k = len(used_patterns)  
 
-# 使用するパターン数の上限
-k = 15  # 例として上限を設定
-
-# 新しい問題の定義
+# 新しい問題の定義 (ステップ2: パターン数制限付き最適化)
 prob2 = pulp.LpProblem("Minimize_Number_of_Raw_Materials_with_Limited_Patterns", pulp.LpMinimize)
 
 # 変数の定義
@@ -107,17 +109,31 @@ prob2 += pulp.lpSum([z[h] for h in range(len(used_patterns))]), "Minimize_Total_
 for j in range(len(lengths)):
     prob2 += pulp.lpSum([z[h] * used_patterns[h][j] for h in range(len(used_patterns))]) >= required_quantities[j], f"Demand_Constraint_{j}_Step2"
 
-# 制約2: w_h <= z_h <= M * w_h の制約
+# 制約2: パターンを使用するかどうか
 M = 1000  # 十分大きな定数
 for h in range(len(used_patterns)):
-    prob2 += w[h] <= z[h], f"Lower_Bound_Constraint_{h}"
-    prob2 += z[h] <= M * w[h], f"Upper_Bound_Constraint_{h}"
+    prob2 += w[h] <= z[h], f"Pattern_Usage_Constraint_1_{h}"
+    prob2 += z[h] <= M * w[h], f"Pattern_Usage_Constraint_2_{h}"
 
 # 制約3: 使用するパターン数の上限
 prob2 += pulp.lpSum([w[h] for h in range(len(used_patterns))]) <= k, "Pattern_Limit_Constraint"
 
+# 目的関数の出力
+print("目的関数:")
+print(prob2.objective)
+
+# 制約条件の出力
+print("\n制約条件:")
+for constraint_name, constraint in prob2.constraints.items():
+    print(f"{constraint_name}: {constraint}")
+
+
 # 最適化実行
-prob2.solve(pulp.SCIP_CMD(msg=False))  # SCIPソルバーを使用
+#prob2.solve(pulp.SCIP_CMD(msg=True))  # SCIPソルバーを使用
+#prob2.solve(pulp.SCIP_CMD(msg=True, options=['limits/gap=0', 'presolving/maxrounds=0']))
+# SCIPソルバー設定例 (プリソルビングは有効にして、ギャップは低い値に設定)
+#prob2.solve(pulp.SCIP_CMD(msg=True, options=['limits/gap=0.01', 'presolving/maxrounds=-1', 'display/verblevel=5']))
+prob2.solve(pulp.SCIP_CMD(msg=True, options=['limits/gap=0', 'limits/time=3600', 'display/verblevel=5']))
 
 # ステップ2の結果の出力
 final_pattern_counts = {}
