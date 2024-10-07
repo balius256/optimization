@@ -40,3 +40,37 @@ s_{i,m} \in \{0,1\} \quad \forall i, \forall m
 \sum_{m=1}^{12} s_{i,m} \leq M_{\text{over}} \quad \forall i
 
 \sum_{m=1}^{9} o_{i,m} \leq O_{\text{cumulative}} \quad \forall i
+
+% 生産性パラメータ
+p_i > 0
+
+% 年休取得スケジュール
+v_{i,t} \in \{0,1\}
+
+% 従業員数
+N
+
+T
+
+% 平日、週末、祝日の集合
+\text{Weekdays} % 平日
+\text{Weekend} % 週末
+\text{Holidays} % 祝日
+\text{Workdays} = \text{Weekdays} \setminus \text{Holidays}
+
+% 大きな定数
+M
+
+% その他の定数
+H_{\text{std}} = 7.75 \quad \text{（時間）}
+H_{\text{max}} \quad \text{（例：12時間）}
+H_{\text{week}} = 38.75 \quad \text{（時間）}
+O_{\text{max}} = 45 \quad \text{（時間）}
+O_{\text{annual}} = 720 \quad \text{（時間）}
+M_{\text{over}} = 6
+O_{\text{cumulative}} = 400 \quad \text{（時間）}
+C_{\text{normal}} \quad \text{（円/時間）}
+C_{\text{overtime}} = 1.25 \times C_{\text{normal}} \quad \text{など}
+S_t \quad \text{（円/生産量単位）}
+\text{Workdays}_w : \text{週 } w \text{ の勤務可能日}
+\text{Workdays}_m : \text{月 } m \text{ の勤務可能日}
