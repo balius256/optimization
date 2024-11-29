@@ -1,5 +1,5 @@
 # 必要なライブラリのインポート
-from pulp import LpMaximize, LpProblem, LpVariable, lpSum, LpStatus, value
+from pulp import LpMaximize, LpProblem, LpVariable, lpSum, LpStatus, value, SCIP_CMD, PULP_CBC_CMD
 import numpy as np
 import random
 import pandas as pd
@@ -36,11 +36,6 @@ H_max = 12
 shift_length = 8.5
 I_min = 11
 
-# 夜勤の労働時間関連のパラメータ
-H_std_night = 7.75
-H_max_night = 12
-shift_length_night = 8.5  # 夜勤のシフト長
-
 # 週の労働時間上限
 H_week_max = 38.75  # 週の労働時間上限を48時間に調整
 
@@ -64,9 +59,9 @@ S_t = {t: S_t_array[t] for t in T_range}
 p_i = {i: 1.0 + random.uniform(-0.3, 0.3) for i in I}
 
 # シフトごとの従業員数の上限・下限
-E_min_day = 2
+E_min_day = 3
 E_max_day = 5
-E_min_night = 1
+E_min_night = 3
 E_max_night = 5
 
 # 36協定関連のパラメータ
@@ -82,7 +77,7 @@ v_it = {(i, t): 0 for i in I for t in T_range}  # 年休取得フラグ
 e_i = {i: 0 for i in I}  # 特別条項付き協定フラグ
 
 # ビッグMの設定
-Big_M = H_max  # H_max = 12
+Big_M = 10*H_max  # H_max = 12
 
 # 変数の定義
 h = LpVariable.dicts("h", (I, T_range), lowBound=0, upBound=H_max)
@@ -136,13 +131,13 @@ for t in T_range:
 for i in I:
     for t in T_range:
         # 3.1 勤務時間の定義
-        prob += h[i][t] == H_std * d[i][t] + H_std_night * n[i][t] + r[i][t]
+        prob += h[i][t] == H_std * w[i][t]  + r[i][t]
 
         # 3.2 労働時間の上限
-        prob += h[i][t] <= H_max * d[i][t] + H_max_night * n[i][t]
+        prob += h[i][t] <= H_max * w[i][t] 
 
         # 3.3 時間外労働時間の上限
-        prob += r[i][t] <= (H_max - H_std) * d[i][t] + (H_max_night - H_std_night) * n[i][t]
+        prob += r[i][t] <= (H_max - H_std) * w[i][t] 
 
 # 4. 勤務開始・終了時刻の制約
 for i in I:
@@ -151,16 +146,16 @@ for i in I:
         prob += s_start[i][t] == s_day_start * d[i][t] + s_night_start * n[i][t]
 
         # 4.2 勤務終了時刻の定義
-        prob += s_end[i][t] == s_start[i][t] + shift_length * d[i][t] + shift_length_night * n[i][t]
+        prob += s_end[i][t] == s_start[i][t] + shift_length * w[i][t] 
 
 # 5. 勤務間インターバル制約
 for i in I:
     for t in T_range_minus_1:
         # 5.1 最低休息時間の確保
-        prob += s_start[i][t+1] - s_end[i][t] + 24 * delta[i][t] >= I_min
+        prob += s_start[i][t] - s_end[i][t] + 24 * delta[i][t] >= I_min
 
         # 5.2 日付跨ぎの判定
-        prob += delta[i][t] >= n[i][t] + d[i][t+1] - 1
+        prob += delta[i][t] >= n[i][t] + d[i][t] - 1
 
 # 6. 労働時間の週次制約
 for i in I:
@@ -208,8 +203,10 @@ for i in I:
         prob += g[i][t] <= Big_M * n[i][t]
         prob += g[i][t] >= 0
 
+solver = SCIP_CMD("C:\\Program Files\\SCIPOptSuite 9.1.0\\bin\\scip.exe")
+
 # 問題の解決
-prob.solve()
+prob.solve(solver)
 
 # 結果の収集
 results = []
