@@ -1,12 +1,13 @@
 # 必要なライブラリのインポート
 from pulp import LpMaximize, LpProblem, LpVariable, lpSum, LpBinary, LpContinuous, value, LpStatus
 import numpy as np
+import random
 
 # 問題の定義
 prob = LpProblem("Shift_Scheduling", LpMaximize)
 
 # パラメータの設定
-N = 4   # 従業員数
+N = 9   # 従業員数
 T = 30  # 日数
 M = 1   # 月数
 
@@ -16,12 +17,13 @@ T_range = range(1, T+1)  # 日数のインデックス
 M_range = range(1, M+1)  # 月数のインデックス
 
 # 週の定義
-Weeks = [1, 2, 3, 4]
+Weeks = [1, 2, 3, 4, 5]
 Week_days = {
     1: list(range(1, 8)),
     2: list(range(8, 15)),
     3: list(range(15, 22)),
-    4: list(range(22, 29))
+    4: list(range(22, 29)),
+    5: list(range(29, 31))
 }
 
 # 労働時間関連のパラメータ
@@ -29,6 +31,9 @@ H_std = 7.75
 H_max = 12
 shift_length = 8.5
 I_min = 11
+
+# 週の労働時間上限
+H_week_max = 48  # 週の労働時間上限を48時間に調整
 
 # シフト開始時刻
 s_day_start = 8.5
@@ -47,24 +52,25 @@ S_t_array[0] = 0  # ダミーの0番目の要素
 S_t = {t: S_t_array[t] for t in T_range}
 
 # 従業員の生産性
-p_i = {1: 1.0, 2: 0.8, 3: 1.2, 4: 1.0}
+# 生産性 p_i を ±30% の範囲でランダムに設定
+p_i = {i: 1.0 + random.uniform(-0.3, 0.3) for i in I}
 
 # シフトごとの従業員数の上限・下限
-E_min_day = 2
-E_max_day = 2
-E_min_night = 2
-E_max_night = 2
+E_min_day = 3
+E_max_day = 5  
+E_min_night = 3
+E_max_night = 5  
 
 # 36協定関連のパラメータ
 O_annual = 360  # 年間時間外労働時間の上限（仮の値）
 O_annual_special = 720  # 年間時間外労働時間の上限（特別条項あり）
-O_max = 45  # 月間時間外労働時間の上限
+O_max = 80  # 月間時間外労働時間の上限を80時間に緩和（法定内で）
 O_max_special = 100  # 月間時間外労働時間の上限（特別条項あり）
 M_over = 6  # 年間で45時間超過可能な月数の上限
 M_past = 0  # 過去の月数
 
 # その他のパラメータ
-Big_M = H_max
+Big_M = H_max * 2  # Big_Mを十分大きな値に設定
 v_it = {(i, t): 0 for i in I for t in T_range}  # 年休取得フラグ
 e_i = {i: 0 for i in I}  # 特別条項付き協定フラグ
 O_i_m_hist = {}  # 過去の時間外労働時間
@@ -81,7 +87,6 @@ s_end = LpVariable.dicts("s_end", [(i, t) for i in I for t in T_range], lowBound
 f = LpVariable.dicts("f", [(i, t) for i in I for t in T_range], lowBound=0, cat=LpContinuous)
 g = LpVariable.dicts("g", [(i, t) for i in I for t in T_range], lowBound=0, cat=LpContinuous)
 delta = LpVariable.dicts("delta", [(i, t) for i in I for t in T_range], cat=LpBinary)
-c = LpVariable.dicts("c", [(i, t) for i in I for t in T_range], cat=LpBinary)
 o = LpVariable.dicts("o", [(i, m) for i in I for m in M_range], lowBound=0, cat=LpContinuous)
 s_var = LpVariable.dicts("s", [(i, m) for i in I for m in M_range], cat=LpBinary)
 
@@ -121,9 +126,10 @@ for i in I:
     for t in T_range:
         # 勤務時間の定義
         prob += h[(i, t)] == H_std * w[(i, t)] + r[(i, t)]
-
-        # 1日あたりの最大労働時間
+        # 勤務していない場合、労働時間と時間外労働時間はゼロ
         prob += h[(i, t)] <= H_max * w[(i, t)]
+        prob += r[(i, t)] <= (H_max - H_std) * w[(i, t)]
+        prob += r[(i, t)] >= 0
 
 # 3. 勤務開始・終了時刻の制約
 for i in I:
@@ -144,11 +150,11 @@ for i in I:
             # 日付跨ぎの判定
             prob += delta[(i, t)] >= n[(i, t)] + d[(i, t+1)] - 1
 
-# 5. 労働時間の週次制約
+# 5. 労働時間の週次制約（週の労働時間上限を設定）
 for i in I:
-    for week in Weeks:  # ループ変数を 'week' に変更
+    for week in Weeks:
         days = Week_days[week]
-        prob += lpSum([h[(i, t)] for t in days]) <= H_std * len(days) + lpSum([r[(i, t)] for t in days])
+        prob += lpSum([h[(i, t)] for t in days]) <= H_week_max
 
 # 6. 時間外労働時間の計算
 for i in I:
@@ -181,16 +187,11 @@ for i in I:
     total_flags = lpSum([s_var[(i, m)] for m in M_range])
     prob += total_flags <= M_over
 
-# 9. 連続勤務後の休暇制約
+# 9. 連続勤務日の上限を設定（最大6連勤）
 for i in I:
     for t in T_range:
-        if t + 4 <= T:
-            # 5日連続勤務フラグの定義
-            prob += lpSum([w[(i, t + k)] for k in range(0, 5)]) >= 5 * c[(i, t)]
-
         if t + 6 <= T:
-            # 連続休暇の強制
-            prob += w[(i, t + 5)] + w[(i, t + 6)] <= 2 * (1 - c[(i, t)])
+            prob += lpSum([w[(i, t + k)] for k in range(0, 7)]) <= 6
 
 # 10. 夜勤に関する補助変数の制約
 for i in I:
@@ -212,14 +213,20 @@ prob.solve()
 print("Status:", LpStatus[prob.status])
 
 for i in I:
-    print(f'従業員 {i}:')
+    print(f'従業員 {i}:{p_i[i]}')
     for t in T_range:
         shift = '休み'
         if value(d[(i, t)]) == 1:
             shift = '昼勤務'
         elif value(n[(i, t)]) == 1:
             shift = '夜勤務'
-        print(f'  日 {t}: {shift}, 労働時間: {value(h[(i, t)]):.2f} 時間, 時間外: {value(r[(i, t)]):.2f} 時間')
+        if shift == '休み':
+            labor_hours = 0.00
+            overtime_hours = 0.00
+        else:
+            labor_hours = value(h[(i, t)])
+            overtime_hours = value(r[(i, t)])
+        print(f'  日 {t}: {shift}, 労働時間: {labor_hours:.2f} 時間, 時間外: {overtime_hours:.2f} 時間')
     print('-----------------------------------')
 
 print(f'総利益: {value(prob.objective):.2f} 円')
